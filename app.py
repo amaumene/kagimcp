@@ -15,8 +15,14 @@ from pydantic import Field
 # Initialize FastMCP app
 app = FastMCP("kagimcp", dependencies=["kagiapi", "mcp[cli]"])
 
-# Initialize Kagi client
-kagi_client = KagiClient()
+# Lazy initialization of Kagi client
+_kagi_client = None
+
+def get_kagi_client():
+    global _kagi_client
+    if _kagi_client is None:
+        _kagi_client = KagiClient()
+    return _kagi_client
 
 
 @app.tool()
@@ -31,7 +37,8 @@ def kagi_search_fetch(
             raise ValueError("Search called with no queries.")
 
         with ThreadPoolExecutor() as executor:
-            results = list(executor.map(kagi_client.search, queries, timeout=10))
+            client = get_kagi_client()
+            results = list(executor.map(client.search, queries, timeout=10))
 
         return format_search_results(queries, results)
 
@@ -113,7 +120,8 @@ def kagi_summarizer(
 
         engine = cast(Literal["cecil", "agnes", "daphne", "muriel"], engine)
 
-        summary = kagi_client.summarize(
+        client = get_kagi_client()
+        summary = client.summarize(
             url,
             engine=engine,
             summary_type=summary_type,
@@ -124,3 +132,18 @@ def kagi_summarizer(
 
     except Exception as e:
         return f"Error: {str(e) or repr(e)}"
+
+
+# For local testing and running
+if __name__ == "__main__":
+    # Default to HTTP mode for fastmcp.cloud
+    # Use --stdio flag for stdio mode
+    import sys
+    if "--stdio" in sys.argv:
+        # Run in stdio mode for local testing with Claude Desktop
+        app.run()
+    else:
+        # Default: Run in HTTP mode for cloud deployment and local testing
+        app.settings.host = "0.0.0.0"
+        app.settings.port = 8000
+        app.run("streamable-http")
